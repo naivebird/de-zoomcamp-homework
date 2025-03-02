@@ -35,5 +35,5 @@ FROM quarterly_revenue_2019 qr19
 JOIN quarterly_revenue_2020 qr20
 ON qr19.pickup_quarter = qr20.pickup_quarter
 AND qr19.service_type = qr20.service_type
-ORDER BY qr19.service_type ASC, yoy DESC
+ORDER BY qr19.service_type, yoy 
 
