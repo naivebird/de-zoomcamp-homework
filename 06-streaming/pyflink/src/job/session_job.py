@@ -1,21 +1,17 @@
 from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.table import EnvironmentSettings, DataTypes, TableEnvironment, StreamTableEnvironment
-from pyflink.common.watermark_strategy import WatermarkStrategy
-from pyflink.common.time import Duration
+from pyflink.table import EnvironmentSettings, StreamTableEnvironment
+from pyflink.table.expressions import lit, col
 from pyflink.table.window import Session
 
 
 def create_taxi_events_sink_postgres(t_env):
-    table_name = 'taxi_events'
+    table_name = 'taxi_events_sink'
     sink_ddl = f"""
-         CREATE OR REPLACE TABLE {table_name} (
-            lpep_pickup_datetime VARCHAR,
-            lpep_dropoff_datetime VARCHAR,
+         CREATE TABLE IF NOT EXISTS {table_name} (
+            dropoff_timestamp TIMESTAMP,
             PULocationID INTEGER,
             DOLocationID INTEGER,
-            passenger_count INTEGER,
-            trip_distance DOUBLE,
-            tip_amount DOUBLE
+            trip_count BIGINT
         ) WITH (
             'connector' = 'jdbc',
             'url' = 'jdbc:postgresql://postgres:5432/postgres',
@@ -28,8 +24,9 @@ def create_taxi_events_sink_postgres(t_env):
     t_env.execute_sql(sink_ddl)
     return table_name
 
+
 def create_events_source_kafka(t_env):
-    table_name = "taxi_events"
+    table_name = "taxi_events_source"
     pattern = "yyyy-MM-dd HH:mm:ss"
 
     source_ddl = f"""
@@ -38,7 +35,7 @@ def create_events_source_kafka(t_env):
             lpep_dropoff_datetime VARCHAR,
             PULocationID INTEGER,
             DOLocationID INTEGER,
-            passenger_count INTEGER,
+--             passenger_count INTEGER,
             trip_distance DOUBLE,
             tip_amount DOUBLE,
             dropoff_timestamp AS TO_TIMESTAMP(lpep_dropoff_datetime, '{pattern}'),
@@ -71,10 +68,11 @@ def log_processing():
         source_table = create_events_source_kafka(t_env)
         postgres_sink = create_taxi_events_sink_postgres(t_env)
 
-        session_window = t_env.from_path(source_table).window(
-            Session.with_gap("5.minutes").on("dropoff_timestamp").alias("w")
-        )
-        result = t_env.window(session_window).select('*')
+        result = t_env.from_path(source_table) \
+            .window(Session.with_gap(lit(5).minutes).on(col("dropoff_timestamp")).alias("w")) \
+            .group_by(col("w"), col("PULocationID"), col("DOLocationID")) \
+            .select(col("w").start.alias("dropoff_timestamp"), col("PULocationID"), col("DOLocationID"),
+                    col("PULocationID").count.alias("trip_count"))
 
         result.execute_insert(postgres_sink)
 
